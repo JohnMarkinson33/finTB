@@ -858,6 +858,28 @@ tr.tx-excluded>td:first-child{border-left:3px solid var(--red)}
   </div>
 </div>
 
+<!-- REAPPLY CONFLICT MODAL -->
+<div class="modal-bg" id="m-reapply">
+  <div class="modal" style="width:640px;max-width:calc(100vw - 32px)">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+      <div>
+        <div style="font-weight:700;font-size:14px">🔒 Konflikty s ručnými kategóriami</div>
+        <div style="font-size:11px;color:var(--mu);margin-top:2px">Vyber transakcie, ktoré chceš prekategorizovať pravidlom</div>
+      </div>
+      <button class="mc" style="position:static;margin:0" onclick="cm('m-reapply')">✕</button>
+    </div>
+    <!-- Group select bar -->
+    <div id="rap-group-bar" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px"></div>
+    <!-- Conflict list -->
+    <div id="rap-list" style="max-height:380px;overflow-y:auto;border:1px solid var(--bd);border-radius:6px;margin-bottom:14px"></div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;align-items:center">
+      <span id="rap-sel-count" style="font-size:11px;color:var(--mu);margin-right:auto"></span>
+      <button class="btn" onclick="cm('m-reapply')" style="color:var(--mu);border-color:var(--bd)">Preskočiť všetky</button>
+      <button class="btn" onclick="applySelectedConflicts()" style="background:var(--acc);color:#fff;border-color:var(--acc)">Aplikovať vybraté</button>
+    </div>
+  </div>
+</div>
+
 <!-- DETAIL MODAL -->
 <div class="modal-bg" id="m-det">
   <div class="modal" id="modal-det-inner">
@@ -875,7 +897,8 @@ tr.tx-excluded>td:first-child{border-left:3px solid var(--red)}
     <div class="me">
       <div class="ml">Kategória</div>
       <div style="display:flex;gap:6px;margin-bottom:6px">
-        <select class="mi" id="md-cat" style="margin-bottom:0;flex:1" onchange="autoSaveDet()"></select>
+        <select class="mi" id="md-cat" style="margin-bottom:0;flex:1" onchange="autoSaveDet();_setCatLocked()"></select>
+        <span id="md-cat-lock" style="font-size:9px;color:var(--mu);margin-left:6px;white-space:nowrap"></span>
         <button class="btn" style="font-size:11px;padding:5px 9px;flex-shrink:0" onclick="openCatEditModal(detId)" title="Nová kategória">＋</button>
         <button class="btn" style="font-size:11px;padding:5px 9px;flex-shrink:0;color:var(--acc2)" onclick="openSplitModal(detId)" title="Rozdeliť transakciu">✂</button>
       </div>
@@ -1408,7 +1431,8 @@ function mergeTransactions(newTxs, source) {
           ...(ex.debtLinks&&{debtLinks:ex.debtLinks}),
           ...(ex.debtLink&&{debtLink:ex.debtLink}),
           ...(ex.excluded&&{excluded:ex.excluded}),
-          ...(ex.reviewed&&{reviewed:ex.reviewed})};
+          ...(ex.reviewed&&{reviewed:ex.reviewed}),
+          ...(ex.categoryLocked&&{categoryLocked:ex.categoryLocked})};
         upgraded++;
         dupLog.push({tx:nw,reason:'Autorizovaná → Zúčtovaná'+(fuzzyEx?' (fuzzy)':''),type:'upgrade'});
       } else {
@@ -1477,7 +1501,8 @@ function mergeTransactions(newTxs, source) {
             ...(ex.debtLinks&&{debtLinks:ex.debtLinks}),
             ...(ex.debtLink&&{debtLink:ex.debtLink}),
             ...(ex.excluded&&{excluded:ex.excluded}),
-            ...(ex.reviewed&&{reviewed:ex.reviewed}) };
+            ...(ex.reviewed&&{reviewed:ex.reviewed}),
+            ...(ex.categoryLocked&&{categoryLocked:ex.categoryLocked}) };
           // Silent update — not counted as dup or new
         } else {
           // Genuinely new (e.g. 2nd identical transaction legitimately same day)
@@ -2280,7 +2305,8 @@ function renderTxPage(){
         const cat=getCatD().find(c=>c.id===tx.category);
         const lbl=cat?cat.l:'Nezaradené';
         const clr=cat?cat.c:'var(--mu)';
-        return`<td class="sticky-r"><span class="cat-qb" style="border-color:${clr};color:${clr}" onclick="event.stopPropagation();openCatPicker('${tx.id}',this)">${lbl}</span></td>`;
+        const lkIco=tx.categoryLocked?'<span style="font-size:7px;opacity:.6;margin-left:2px" title="Ručne nastavená">🔒</span>':'';
+        return`<td class="sticky-r"><span class="cat-qb" style="border-color:${clr};color:${clr}" onclick="event.stopPropagation();openCatPicker('${tx.id}',this)">${lbl}${lkIco}</span></td>`;
       }
       if(col.id==='amount')return`<td class="ta sticky-r ${tx.amount>=0?'pos':'neg'}">${tx.amount>=0?'+':''}${tx.amount.toFixed(2).replace('.',',')} €</td>`;
       return'<td>—</td>';
@@ -2360,6 +2386,8 @@ function openDet(id){
       <div class="fv" style="${f.cls==='pos'?'color:var(--grn)':f.cls==='neg'?'color:var(--red)':''}">${f.v}</div>
     </div>`).join('');
   document.getElementById('md-cat').innerHTML=`<option value="" ${!tx.category?'selected':''} style="color:var(--mu)">— Nezaradené</option>`+getCatD().map(c=>`<option value="${c.id}"${tx.category===c.id?' selected':''}>${c.l}</option>`).join('');
+  const lockHint=document.getElementById('md-cat-lock');
+  if(lockHint) lockHint.textContent=tx.categoryLocked?'🔒 ručne nastavená':'auto';
   // Splits display
   const splitsEl = document.getElementById('md-splits');
   const catSel = document.getElementById('md-cat');
@@ -2538,6 +2566,15 @@ function autoSaveDet(){
   if(cyEl&&cyEl.style.display!=='none') toggleCyTxList(true);
 }
 function saveDet(){ autoSaveDet(); }
+
+function _setCatLocked(){
+  const tx=TX.find(t=>t.id===detId); if(!tx) return;
+  const v=document.getElementById('md-cat')?.value||undefined;
+  tx.categoryLocked=v?true:undefined;
+  saveD();
+  const hint=document.getElementById('md-cat-lock');
+  if(hint) hint.textContent=tx.categoryLocked?'🔒 ručne nastavená':'auto';
+}
 
 function toggleExcluded(){
   const tx=TX.find(t=>t.id===detId); if(!tx)return;
@@ -2902,42 +2939,149 @@ function deleteRule(id){
   saveD(); renderRules();
 }
 
-function reapplyRules(){
-  let changed=0, skipped=0;
-  TX.forEach(tx=>{
-    // Only apply if a rule explicitly matches — not the fallback (null / 'sporenie')
-    // We detect a rule match by checking directly against rules, not using autocat fallback
-    let matchedCat=null, matchedSplatka=undefined, ruleMatched=false;
-    const f={
-      merchant: (tx.merchantOverride||tx.merchant||'').toLowerCase(),
-      description: (tx.description||'').toLowerCase(),
-      place: (tx.place||'').toLowerCase(),
-      info: (tx.info||'').toLowerCase(),
-      iban: (tx.iban||'').toLowerCase(),
-      vs: (tx.vs||'').toLowerCase(),
-      ref: (tx.ref||'').toLowerCase(),
-      type: (tx.type||'').toLowerCase(),
-    };
-    f.any=Object.values(f).join(' ');
-    for(const r of rules){
-      const hay=r.field==='any'?f.any:(f[r.field]??f.any);
-      if(!hay.includes(r.keyword.toLowerCase()))continue;
-      if(r.amtOp&&r.amtVal){
-        const absAmt=Math.abs(tx.amount);
-        if(r.amtOp==='lt'&&absAmt>=r.amtVal)continue;
-        if(r.amtOp==='gt'&&absAmt<=r.amtVal)continue;
-        if(r.amtOp==='eq'&&Math.abs(absAmt-r.amtVal)>0.005)continue;
-      }
-      matchedCat=r.category; matchedSplatka=r.isSplatka; ruleMatched=true;
-      break;
+function _matchRule(tx){
+  const f={
+    merchant:(tx.merchantOverride||tx.merchant||'').toLowerCase(),
+    description:(tx.description||'').toLowerCase(),
+    place:(tx.place||'').toLowerCase(),
+    info:(tx.info||'').toLowerCase(),
+    iban:(tx.iban||'').toLowerCase(),
+    vs:(tx.vs||'').toLowerCase(),
+    ref:(tx.ref||'').toLowerCase(),
+    type:(tx.type||'').toLowerCase(),
+  };
+  f.any=Object.values(f).join(' ');
+  for(const r of rules){
+    const hay=r.field==='any'?f.any:(f[r.field]??f.any);
+    if(!hay.includes(r.keyword.toLowerCase()))continue;
+    if(r.amtOp&&r.amtVal){
+      const absAmt=Math.abs(tx.amount);
+      if(r.amtOp==='lt'&&absAmt>=r.amtVal)continue;
+      if(r.amtOp==='gt'&&absAmt<=r.amtVal)continue;
+      if(r.amtOp==='eq'&&Math.abs(absAmt-r.amtVal)>0.005)continue;
     }
-    if(!ruleMatched){skipped++;return;} // no rule matches → preserve existing category
-    if(matchedCat!==tx.category){tx.category=matchedCat;changed++;}
-    if(matchedSplatka!==undefined&&tx.source==='credit_card') tx.isSplatka=matchedSplatka||undefined;
+    return {category:r.category, isSplatka:r.isSplatka};
+  }
+  return null;
+}
+
+function reapplyRules(){
+  const catMap=getCAT();
+  let changed=0;
+  const conflicts=[]; // {tx, matchedCat, matchedSplatka}
+
+  TX.forEach(tx=>{
+    const match=_matchRule(tx);
+    if(!match) return;
+    if(tx.categoryLocked && match.category!==tx.category){
+      // Collect conflict — don't apply yet
+      conflicts.push({tx, matchedCat:match.category, matchedSplatka:match.isSplatka});
+      return;
+    }
+    // No lock or same category — apply directly
+    if(match.category!==tx.category){tx.category=match.category;changed++;}
+    if(match.isSplatka!==undefined&&tx.source==='credit_card') tx.isSplatka=match.isSplatka||undefined;
   });
   saveD();
-  alert(`Hotovo — ${changed} transakcií preradených pravidlom.\n${skipped} transakcií bez zhody zostalo nezmenených.`);
-  renderRules();
+
+  if(conflicts.length>0){
+    showConflictModal(conflicts, changed);
+  } else {
+    alert(`Hotovo — ${changed} transakcií preradených.`);
+    renderRules(); renderTx();
+  }
+}
+
+let _rapConflicts=[];
+function showConflictModal(conflicts, alreadyChanged){
+  _rapConflicts=conflicts;
+  const catMap=getCAT();
+
+  // Group bar by target category
+  const byTarget={};
+  conflicts.forEach(({matchedCat})=>{
+    const lbl=catMap[matchedCat]?.l||'Nezaradené';
+    byTarget[lbl]=(byTarget[lbl]||0)+1;
+  });
+  const groupBar=document.getElementById('rap-group-bar');
+  groupBar.innerHTML=Object.entries(byTarget).map(([lbl,cnt])=>
+    `<button class="btn" style="font-size:10px;padding:3px 9px" onclick="rapSelectByTarget('${lbl}')">
+      Všetky → ${lbl} <span style="color:var(--acc);margin-left:3px">${cnt}</span>
+    </button>`
+  ).join('')+
+  `<button class="btn" style="font-size:10px;padding:3px 9px;margin-left:auto;color:var(--mu)" onclick="rapSelectAll(true)">Všetky ✓</button>
+   <button class="btn" style="font-size:10px;padding:3px 9px;color:var(--mu)" onclick="rapSelectAll(false)">Zrušiť výber</button>`;
+
+  // Build list
+  const list=document.getElementById('rap-list');
+  list.innerHTML=conflicts.map(({tx,matchedCat},i)=>{
+    const fromCat=catMap[tx.category];
+    const toCat=catMap[matchedCat];
+    const fromClr=fromCat?.c||'var(--mu)';
+    const toClr=toCat?.c||'var(--mu)';
+    const fromLbl=fromCat?.l||'Nezaradené';
+    const toLbl=toCat?.l||'Nezaradené';
+    const d=eDate(tx)||tx.date;
+    const ds=d?(d.getDate()+'.'+(d.getMonth()+1)+'.'+d.getFullYear()):'';
+    const merchant=tx.merchantOverride||tx.merchant||tx.description||'—';
+    return`<label style="display:flex;align-items:center;gap:10px;padding:8px 12px;border-bottom:1px solid var(--bd);cursor:pointer;transition:background .1s" 
+        onmouseover="this.style.background='rgba(94,168,216,.05)'" onmouseout="this.style.background=''"
+        data-target="${catMap[matchedCat]?.l||''}">
+      <input type="checkbox" data-idx="${i}" onchange="rapUpdateCount()" style="accent-color:var(--acc);width:15px;height:15px;flex-shrink:0">
+      <div style="flex:1;min-width:0">
+        <div style="font-size:11px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${merchant}</div>
+        <div style="font-size:10px;color:var(--mu)">${ds} · ${Math.abs(tx.amount).toFixed(2).replace('.',',')} €</div>
+      </div>
+      <div style="display:flex;align-items:center;gap:6px;white-space:nowrap;font-size:11px">
+        <span style="color:${fromClr};background:${fromClr}18;padding:2px 7px;border-radius:3px">${fromLbl}</span>
+        <span style="color:var(--mu)">→</span>
+        <span style="color:${toClr};background:${toClr}18;padding:2px 7px;border-radius:3px">${toLbl}</span>
+      </div>
+      <button onclick="event.preventDefault();openDet('${tx.id}')" title="Otvoriť detail" 
+        style="background:transparent;border:none;color:var(--mu);cursor:pointer;font-size:12px;padding:2px 4px">⧉</button>
+    </label>`;
+  }).join('');
+
+  rapUpdateCount();
+  document.getElementById('m-reapply').dataset.alreadyChanged=alreadyChanged;
+  document.getElementById('m-reapply').classList.add('on');
+}
+
+function rapUpdateCount(){
+  const checked=document.querySelectorAll('#rap-list input[type=checkbox]:checked').length;
+  const total=_rapConflicts.length;
+  document.getElementById('rap-sel-count').textContent=`Vybraté: ${checked} z ${total}`;
+}
+
+function rapSelectAll(val){
+  document.querySelectorAll('#rap-list input[type=checkbox]').forEach(cb=>cb.checked=val);
+  rapUpdateCount();
+}
+
+function rapSelectByTarget(label){
+  document.querySelectorAll('#rap-list label').forEach(lbl=>{
+    const cb=lbl.querySelector('input[type=checkbox]');
+    if(cb) cb.checked=(lbl.dataset.target===label);
+  });
+  rapUpdateCount();
+}
+
+function applySelectedConflicts(){
+  const catMap=getCAT();
+  let applied=0;
+  document.querySelectorAll('#rap-list input[type=checkbox]:checked').forEach(cb=>{
+    const i=parseInt(cb.dataset.idx);
+    const {tx,matchedCat,matchedSplatka}=_rapConflicts[i];
+    tx.category=matchedCat;
+    tx.categoryLocked=undefined; // unlock — pravidlo teraz zaberá automaticky
+    if(matchedSplatka!==undefined&&tx.source==='credit_card') tx.isSplatka=matchedSplatka||undefined;
+    applied++;
+  });
+  saveD();
+  cm('m-reapply');
+  const prev=parseInt(document.getElementById('m-reapply').dataset.alreadyChanged||0);
+  alert(`Hotovo — ${prev+applied} transakcií preradených, ${_rapConflicts.length-applied} ručných zachovaných.`);
+  renderRules(); renderTx();
 }
 
 async function importRules(inp){
